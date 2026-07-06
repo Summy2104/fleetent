@@ -100,6 +100,22 @@ def test_agent_file_requires_models() -> None:
         agent_config.AgentFile.model_validate({"name": "bare", "version": 1})
 
 
+def test_hot_mcp_servers_defaults_empty() -> None:
+    """deferred-tool-loading: absent hot_mcp_servers → empty list (all MCP deferred)."""
+    af = agent_config.AgentFile.model_validate(
+        {"name": "bare", "version": 1, "models": _valid_models_doc()}
+    )
+    assert af.hot_mcp_servers == []
+
+
+def test_hot_mcp_servers_parsed() -> None:
+    """deferred-tool-loading: fnmatch patterns preserved verbatim."""
+    doc = _valid_doc()
+    doc["hot_mcp_servers"] = ["crm__*", "jira__create_*"]
+    af = agent_config.AgentFile.model_validate(doc)
+    assert af.hot_mcp_servers == ["crm__*", "jira__create_*"]
+
+
 def test_default_embedding_route_matches_kb_service_example() -> None:
     models = agent_config.default_models()
     embedding_route = models.routes["embedding"][0]

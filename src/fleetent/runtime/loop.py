@@ -70,6 +70,7 @@ from fleetent.skills import available_skills_prompt, collect_disabled_trace
 from fleetent.skills import match as match_skill  # noqa: F401  # patch target + API parity
 from fleetent.skills import scan as scan_skills
 from fleetent.structured_logging import get_logger
+from fleetent.tools import deferred as deferred_tools
 from fleetent.tools.multimodal import build_message_with_images, has_image_block
 from fleetent.tools.registry import (
     ToolContext,
@@ -1830,6 +1831,7 @@ async def run(
     skill_user_access: dict[str, list[str]] | None = None,
     emit_delivery_trailer: bool = True,
     suppress_outbound_tools: bool = False,
+    hot_mcp_servers: list[str] | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1897,6 +1899,7 @@ async def run(
                 skill_user_access=skill_user_access,
                 emit_delivery_trailer=emit_delivery_trailer,
                 suppress_outbound_tools=suppress_outbound_tools,
+                hot_mcp_servers=hot_mcp_servers,
             )
     finally:
         _active_runs -= 1
@@ -1939,6 +1942,7 @@ async def _run_inner(
     skill_user_access: dict[str, list[str]] | None = None,
     emit_delivery_trailer: bool = True,
     suppress_outbound_tools: bool = False,
+    hot_mcp_servers: list[str] | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1981,6 +1985,16 @@ async def _run_inner(
 
     schemas = _mcp_client.project_schemas(schemas)
 
+    # deferred-tool-loading: split the fully-filtered, model-facing schema set into hot
+    # (resident in tools= every turn) and deferred (only a catalog row until tool_search
+    # fetches them). resolve_tool_name maps a projected MCP name back to canonical so the
+    # hot decision matches hot_mcp_servers patterns written against {server}__{tool}.
+    hot_schemas, deferred_pool = deferred_tools.partition_schemas(
+        schemas,
+        hot_mcp_servers or [],
+        resolve_canonical=_mcp_client.resolve_tool_name,
+    )
+
     # sandbox-containment-gating: read the active backend's bind-mount capability once
     # per run (not per gate decision) so the action gate's sandbox_capable reflects
     # whether file tools truly run in-container this run. Best-effort: a manager build
@@ -2022,7 +2036,22 @@ async def _run_inner(
         # skill-user-access: carry the agent's per-skill allowlist so read_skill + the
         # sandbox skills view gate restricted skills per requester.
         skill_user_access=skill_user_access or {},
+        # deferred-tool-loading: the deferred pool tool_search reads; activated_tools
+        # starts empty (fresh per run — resume re-searches).
+        deferred_pool=deferred_pool,
     )
+    # deferred-tool-loading: inject the deferred-tool catalog once per run (name + one-line
+    # description rows) so the model knows what tool_search can fetch without paying the
+    # full-schema cost. Empty when nothing is deferred (all hot / no MCP).
+    _catalog = deferred_tools.build_deferred_catalog(deferred_pool, activated=set())
+    if _catalog:
+        _append_system_context(
+            messages,
+            system_prompt,
+            "以下工具尚未加载，仅列出名称与简介。需要时用 tool_search "
+            "（关键词或 select:<name>）取回其完整定义，下一轮即可调用：\n"
+            f"<deferred-tools>\n{_catalog}\n</deferred-tools>",
+        )
     user_input = _latest_user_content(messages)
     # Class-A wiring: inject long-term context (KB + memory) and record the
     # injected-context trace. Best-effort — a missing DB / disabled KB must not
@@ -2199,12 +2228,18 @@ async def _run_inner(
             )
             if _plc_res.inject_context is not None:
                 messages.append({"role": "user", "content": _plc_res.inject_context})
+        # deferred-tool-loading: assemble this turn's tools= = hot + tools activated so far
+        # this run (tool_search records hits in tool_context.activated_tools). Recomputed
+        # per turn so a tool fetched last turn is callable now.
+        turn_schemas = deferred_tools.assemble_turn_schemas(
+            hot_schemas, deferred_pool, tool_context.activated_tools
+        )
         try:
             response, active_cfg = await _call_with_overflow_retry(
                 policy,
                 route_chain,
                 messages,
-                schemas,
+                turn_schemas,
                 session_id=session_id,
                 user_id=user_id,
                 agent_name=agent_name,
@@ -2563,6 +2598,7 @@ async def run_stream(
     skill_authoring_enabled: bool = False,
     skill_hot_reload: bool = True,
     skill_user_access: dict[str, list[str]] | None = None,
+    hot_mcp_servers: list[str] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -2721,6 +2757,7 @@ async def run_stream(
     default_tool_timeout = _resolve_default_tool_timeout(governance)
     flap_state = _load_flap_state(session_id)
     empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
+    _deferred_catalog_injected = False  # deferred-tool-loading: inject the catalog once
     while True:
         forced = controller.should_stop(state)
         if forced is not None:
@@ -2825,12 +2862,36 @@ async def run_stream(
         stream_schemas = _filter_code_execution(stream_schemas, sandbox_mode, agent_features)
         stream_schemas = _filter_skill_authoring(stream_schemas, enabled=skill_authoring_enabled)
 
+        # deferred-tool-loading: split into hot + deferred (the streaming path keeps canonical
+        # names — no projection — so resolve_tool_name is a passthrough here). Refresh the
+        # pool each turn (availability may change), inject the catalog once, assemble tools=.
+        from fleetent.integrations import mcp as _mcp_stream
+
+        hot_schemas, deferred_pool = deferred_tools.partition_schemas(
+            stream_schemas, hot_mcp_servers or [], resolve_canonical=_mcp_stream.resolve_tool_name
+        )
+        tool_context.deferred_pool = deferred_pool
+        if not _deferred_catalog_injected:
+            _deferred_catalog_injected = True
+            _catalog = deferred_tools.build_deferred_catalog(deferred_pool, activated=set())
+            if _catalog:
+                _append_system_context(
+                    messages,
+                    system_prompt,
+                    "以下工具尚未加载，仅列出名称与简介。需要时用 tool_search "
+                    "（关键词或 select:<name>）取回其完整定义，下一轮即可调用：\n"
+                    f"<deferred-tools>\n{_catalog}\n</deferred-tools>",
+                )
+        turn_schemas = deferred_tools.assemble_turn_schemas(
+            hot_schemas, deferred_pool, tool_context.activated_tools
+        )
+
         try:
             stream, active_cfg, messages = await _stream_with_overflow_retry(
                 policy,
                 route_chain,
                 messages,
-                stream_schemas,
+                turn_schemas,
                 session_id=session_id,
                 user_id=user_id,
                 agent_name=agent_name,
