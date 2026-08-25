@@ -46,8 +46,9 @@ def test_migrations_create_tables_and_crud(tmp_path):
 
 
 def test_no_platform_import_in_store():
-    import fleetent.workflow.store as store_mod
     import inspect
+
+    import fleetent.workflow.store as store_mod
 
     src = inspect.getsource(store_mod)
     assert "fleetent.platform" not in src

@@ -693,7 +693,6 @@ MIGRATIONS.append(
 MIGRATIONS.append(
     (
         MIGRATIONS[-1][0] + 1,
-        "CREATE INDEX IF NOT EXISTS idx_workflow_step_runs_run "
-        "ON workflow_step_runs (run_id)",
+        "CREATE INDEX IF NOT EXISTS idx_workflow_step_runs_run ON workflow_step_runs (run_id)",
     )
 )

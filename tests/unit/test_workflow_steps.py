@@ -4,8 +4,6 @@ LLM and dispatch are mocked; no DB. Verifies rendering, output coercion,
 governance fail-closed, structured output, and delivery.
 """
 
-import pytest
-
 from fleetent.workflow.definition import StepDef
 from fleetent.workflow.steps import StepContext, execute_step
 

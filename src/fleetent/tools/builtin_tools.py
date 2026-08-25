@@ -1212,9 +1212,7 @@ async def run_workflow(
     origin = address.to_dict() if address is not None else None
 
     try:
-        run_id = engine.start_run(
-            wf, inputs=parsed_inputs, principal=principal_dict, origin=origin
-        )
+        run_id = engine.start_run(wf, inputs=parsed_inputs, principal=principal_dict, origin=origin)
     except workflow.WorkflowInputError as exc:
         return f"cannot start workflow {name!r}: {exc}"
     engine.spawn(run_id)

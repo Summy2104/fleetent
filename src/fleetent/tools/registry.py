@@ -346,9 +346,7 @@ def dispatch(
     # message, so `_safe_dispatch` feeds the model a self-correction hint this turn.
     try:
         kwargs: dict[str, Any] = (
-            dict(arguments_json)
-            if isinstance(arguments_json, dict)
-            else json.loads(arguments_json)
+            dict(arguments_json) if isinstance(arguments_json, dict) else json.loads(arguments_json)
         )
     except (ValueError, TypeError) as exc:
         raise ValueError(

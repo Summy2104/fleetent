@@ -1,7 +1,5 @@
 """Integration: `fleetent workflow list|run` CLI."""
 
-import pytest
-
 
 def _write(dir_, name, body):
     dir_.mkdir(parents=True, exist_ok=True)

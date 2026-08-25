@@ -1,7 +1,5 @@
 """Unit tests for run_workflow / workflow_status builtin tools (mocked engine/store)."""
 
-import pytest
-
 import fleetent.tools  # noqa: F401 — trigger builtin tool registration side effect
 
 

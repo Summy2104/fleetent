@@ -1,7 +1,5 @@
 """Integration: agent_app boot wiring for the workflow engine + enabled toggle."""
 
-import pytest
-
 
 def _agent(enabled: bool):
     from fleetent.agent_config import AgentFile, default_models
