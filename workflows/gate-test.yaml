@@ -1,0 +1,15 @@
+name: gate-test
+description: 治理冒烟——medium 风险工具在 workflow 中应 fail-closed(非 DIRECT 即失败)
+steps:
+  - id: risky
+    type: tool
+    tool: skill_manage
+    args:
+      action: create
+      name: wf-gate-probe
+      content: "should never be created"
+
+  - id: after
+    type: tool
+    tool: get_current_time
+    depends_on: [risky]

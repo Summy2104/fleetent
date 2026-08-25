@@ -1,0 +1,85 @@
+name: manual-sign-package
+description: |
+  合同签字审批 WF-2（手签支线）：S13→S14
+  总助确认走手签后触发 → 生成材料包（签字位置标注 + 样式示例）→ 路由给对应协调人
+  前置条件：WF-1 已完成且总助审核通过、确认走手签路线
+
+inputs:
+  doc_no:
+    type: string
+    description: 合同编号（从 WF-1 产出继承）
+  contract_name:
+    type: string
+    description: 合同名称
+  entities:
+    type: string
+    description: 签约主体信息（JSON 字符串）
+  signing_location:
+    type: string
+    description: "签署地点: beijing | hongkong"
+  special_instructions:
+    type: string
+    description: 总助的额外指示（可选）
+    default: ""
+
+steps:
+  # ── S13: 手签材料包生成 ────────────────────────────────────────
+  - id: generate_package
+    type: agent
+    prompt: |
+      编号：${inputs.doc_no}
+      合同名称：${inputs.contract_name}
+      签约主体：${inputs.entities}
+      签署地点：${inputs.signing_location}
+      额外指示：${inputs.special_instructions}
+
+      任务（F8 手签材料包生成）：
+      1. 标注每份文件中需要签字的位置（页码、位置描述）
+      2. 提供签字样式示例说明（中文签名/英文签名/盖章要求）
+      3. 确定协调人：
+         - 北京 → 蔺敬
+         - 香港 → 郭桐源
+      4. 列出需要准备的物理材料清单
+
+      只输出一个 JSON 对象。
+    output_schema:
+      type: object
+      required: [doc_no, coordinator, signing_positions, material_checklist, package_text]
+      properties:
+        doc_no: { type: string }
+        coordinator:
+          type: object
+          properties:
+            name: { type: string, description: "蔺敬 | 郭桐源" }
+            location: { type: string, description: "beijing | hongkong" }
+        signing_positions:
+          type: array
+          description: "每个签字位置"
+          items:
+            type: object
+            properties:
+              file_name: { type: string }
+              page: { type: integer }
+              position: { type: string }
+              sign_type: { type: string, description: "中文签名 | 英文签名 | 盖章" }
+        material_checklist:
+          type: array
+          description: "需准备的物理材料"
+          items: { type: string }
+        package_text:
+          type: string
+          description: "完整的材料包说明文本，可直接发给协调人"
+
+  # ── S14: 发送给协调人（Slack）──────────────────────────────────
+  - id: notify_coordinator
+    type: notify
+    text: |
+      📋 手签材料包 ${inputs.doc_no}
+
+      协调人：${steps.generate_package.output.coordinator.name}（${steps.generate_package.output.coordinator.location}）
+
+      ${steps.generate_package.output.package_text}
+
+      ───
+      请安排墨总签署，签完后扫描回传。
+    depends_on: [generate_package]

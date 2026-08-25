@@ -1,0 +1,24 @@
+name: smoke-test
+description: 引擎冒烟——tool step 链 + ${} 字段映射 + DAG 依赖
+inputs:
+  expression:
+    type: string
+    default: "6*7"
+
+steps:
+  - id: now
+    type: tool
+    tool: get_current_time
+
+  - id: calc
+    type: tool
+    tool: calculate
+    args:
+      expression: ${inputs.expression}
+    depends_on: [now]
+
+  - id: double
+    type: tool
+    tool: calculate
+    args:
+      expression: "(${steps.calc.output.text})*2"

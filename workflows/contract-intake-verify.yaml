@@ -1,0 +1,239 @@
+name: contract-intake-verify
+description: |
+  合同签字审批 WF-1（签前段）：S3→S9
+  Slack @提及触发 → 整理合同信息 → 登记 → 核验（主体/身份/差异/完整性）→ 生成摘要 → 投递总助审核
+  人工门控 G1/G2/G3 在结构上成立：产出物只投递给总助，不直接联系老板。
+
+inputs:
+  trigger_text:
+    type: string
+    description: Slack @提及的原始消息文本
+  channel_id:
+    type: string
+    description: 触发消息所在的 Slack channel
+  thread_ts:
+    type: string
+    description: 触发消息的 thread_ts（用于回复同线程）
+    default: ""
+  signing_register_sheet_id:
+    type: string
+    description: 签字登记表的 Google Sheets ID
+
+steps:
+  # ── S2: 渠道判断 + 从 NS 查合同/流程 ────────────────────────────
+  - id: identify_contract
+    type: agent
+    prompt: |
+      你是总裁助理 Agent。以下是 Slack 群发来的合同签字请求：
+
+      「${inputs.trigger_text}」
+
+      任务：
+      1. 判断发起渠道（NS 系统 or 非 NS/Prime/Docusign）
+      2. 从消息中提取合同关键信息（编号、主体、合同名称等）
+      3. 按编号规则确定编号：NS 系统发起用 NS 前缀 + 流程编号，非 NS 用 DS 前缀 + Docusign 编号
+
+      用可用的 NS MCP 工具（ns_list_contracts、ns_get_contract_detail、bpmn_list_processes、bpmn_get_process_detail）查询和验证。
+
+      只输出一个 JSON 对象。
+    output_schema:
+      type: object
+      required: [doc_no, source, contract_name, entities]
+      properties:
+        doc_no:
+          type: string
+          description: "编号，如 NS260429 或 DS260275"
+        source:
+          type: string
+          description: "发起渠道: ns | prime"
+        contract_name:
+          type: string
+        entities:
+          type: array
+          description: "涉及的签约主体列表"
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              role: { type: string }
+        ns_process_id:
+          type: string
+          description: "NS 流程 ID（NS 渠道时有值）"
+        raw_contract_data:
+          type: object
+          description: "从 NS 查到的合同原始数据（供后续步骤使用）"
+
+  # ── S2a: 登记到签字登记表（Google Sheets）──────────────────────
+  #    G4: Drive 已 OAuth 授权，可直接写
+  - id: register_to_sheet
+    type: tool
+    tool: google-drive__appendSpreadsheetRows
+    args:
+      spreadsheetId: "${inputs.signing_register_sheet_id}"
+      range: "登记表!A:H"
+      values:
+        - - "${steps.identify_contract.output.doc_no}"
+          - "${steps.identify_contract.output.source}"
+          - "${steps.identify_contract.output.contract_name}"
+          - "pending"
+          - ""
+          - ""
+          - ""
+          - ""
+    depends_on: [identify_contract]
+
+  # ── S4: 整理合同信息落记录 ─────────────────────────────────────
+  - id: compile_record
+    type: agent
+    prompt: |
+      编号：${steps.identify_contract.output.doc_no}
+      合同名称：${steps.identify_contract.output.contract_name}
+      签约主体：${steps.identify_contract.output.entities}
+
+      任务：整理合同关键信息落记录。
+      1. 用 NS 工具查询合同完整详情（ns_get_contract_detail）
+      2. 查询审批流程进度（bpmn_get_process_approval_workflow）
+      3. 提取：合同编号、合同名称、签约各方、金额、期限、关键条款摘要、审批状态
+
+      只输出一个 JSON 对象。
+    output_schema:
+      type: object
+      required: [doc_no, contract_summary, approval_status]
+      properties:
+        doc_no: { type: string }
+        contract_summary:
+          type: object
+          properties:
+            name: { type: string }
+            parties: { type: array }
+            amount: { type: string }
+            term: { type: string }
+            key_clauses: { type: array }
+        approval_status:
+          type: object
+          properties:
+            current_node: { type: string }
+            pending_approvers: { type: array }
+            completed_nodes: { type: array }
+    depends_on: [identify_contract]
+
+  # ── S5-S7a: 核验（主体识别 + 身份校验 + 差异比对 + 完整性）────
+  #    合并为一个 agent step：内部调用 NS 工具做全面核验
+  #    G2/G3 的落地方式：verdict 字段输出 clean/discrepancy/unclear
+  #    无论结果如何，都只投递给总助，不做任何处置决定
+  - id: verify
+    type: agent
+    prompt: |
+      编号：${steps.identify_contract.output.doc_no}
+      合同数据：${steps.compile_record.output.contract_summary}
+      签约主体：${steps.identify_contract.output.entities}
+
+      执行以下全面核验（用可用的 NS 工具）：
+
+      【S5 Polaris 主体识别】
+      - 检查是否涉及 Polaris 特殊主体
+      - 用 ns_get_company_detail 查询每个签约主体的详细信息
+
+      【S6 开户身份（香港）校验】
+      - 如有香港主体，核验开户身份信息
+
+      【S7 合同差异比对】
+      - 对比 NS 系统中的合同记录与实际合同内容
+      - 注意：Docusign 比对暂不可用，仅基于 NS 数据做内部一致性检查
+
+      【S7a 主体嵌套/多主体/LLC/完整性核验】
+      - 检查是否存在主体嵌套
+      - LLC 等特殊签字身份以 NS 系统记录的主体签字人信息为唯一依据（G5）
+      - 对照审批清单检查各审批节点是否完整
+
+      核验规则：
+      - 发现任何差异 → verdict = "discrepancy"，列出具体问题
+      - 信息不明确/缺失 → verdict = "unclear"，列出缺失项
+      - 全部通过 → verdict = "clean"
+
+      只输出一个 JSON 对象。
+    output_schema:
+      type: object
+      required: [verdict, summary, issues, signing_checklist]
+      properties:
+        verdict:
+          type: string
+          description: "clean | discrepancy | unclear"
+        summary:
+          type: string
+          description: "一句话核验结论"
+        issues:
+          type: array
+          description: "发现的问题列表（clean 时为空数组）"
+          items:
+            type: object
+            properties:
+              category: { type: string }
+              description: { type: string }
+              severity: { type: string }
+        signing_checklist:
+          type: object
+          description: "签署清单（多主体时列出每个主体需签的文件）"
+          properties:
+            files: { type: array }
+            special_notes: { type: array }
+        polaris_flag:
+          type: boolean
+          description: "是否涉及 Polaris 特殊主体"
+        hk_entity_flag:
+          type: boolean
+          description: "是否涉及香港开户身份"
+    depends_on: [compile_record]
+
+  # ── S9: 生成待签字摘要 ─────────────────────────────────────────
+  - id: generate_summary
+    type: agent
+    prompt: |
+      编号：${steps.identify_contract.output.doc_no}
+      合同信息：${steps.compile_record.output.contract_summary}
+      核验结果：${steps.verify.output.verdict}
+      核验摘要：${steps.verify.output.summary}
+      问题列表：${steps.verify.output.issues}
+      签署清单：${steps.verify.output.signing_checklist}
+
+      任务：生成《待签字摘要》供总助人工审核。
+
+      如果 verdict 为 clean：
+      - 生成包含合同要点、签署清单、建议签署方式（电子签/手签）的完整摘要
+
+      如果 verdict 为 discrepancy 或 unclear：
+      - 生成异常说明，明确列出每个问题及建议处理方式
+      - 注意：你只是整理问题，处置决定由总助人工做出（G2/G3）
+
+      只输出一个 JSON 对象。
+    output_schema:
+      type: object
+      required: [doc_no, verdict, briefing_text, recommended_action]
+      properties:
+        doc_no: { type: string }
+        verdict: { type: string }
+        briefing_text:
+          type: string
+          description: "完整的摘要/异常说明文本，可直接展示给总助"
+        recommended_action:
+          type: string
+          description: "clean 时为 proceed_electronic_sign / proceed_manual_sign；异常时为 review_required"
+        signing_method:
+          type: string
+          description: "建议签署方式: electronic | manual | undetermined"
+    depends_on: [verify]
+
+  # ── 投递总助（G1: 只投递，不直接联系老板）─────────────────────
+  - id: notify_assistant
+    type: notify
+    text: |
+      📄 合同签字审批 ${steps.identify_contract.output.doc_no}
+
+      核验结论：${steps.verify.output.verdict}
+
+      ${steps.generate_summary.output.briefing_text}
+
+      ───
+      建议操作：${steps.generate_summary.output.recommended_action}
+      请审核后决定下一步。
+    depends_on: [generate_summary]

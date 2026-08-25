@@ -1,0 +1,124 @@
+name: archive-sync
+description: |
+  合同签字审批 WF-3（签后段）：S16→S17
+  签署完成/扫描件回传后触发 → 归档到 Google Drive → 生成同步通知草稿 → 投递总助审核后发出
+  G1: 同步内容由总助人工审核后发出，Agent 只生成草稿
+  G4: Drive 已 OAuth 授权，归档可直接操作
+
+inputs:
+  doc_no:
+    type: string
+    description: 合同编号
+  contract_name:
+    type: string
+    description: 合同名称
+  signing_method:
+    type: string
+    description: "签署方式: electronic | manual"
+  source_file_ids:
+    type: string
+    description: "已签署文件的 Google Drive file ID 列表（逗号分隔）"
+  requestor_info:
+    type: string
+    description: "发起人信息（用于同步通知，JSON 字符串）"
+  archive_folder_2026_id:
+    type: string
+    description: "2026年存档文件夹的 Google Drive ID"
+
+steps:
+  # ── S16: 归档到 Google Drive ───────────────────────────────────
+  #    G4: Drive OAuth 已授权，Agent 可直接操作
+  - id: create_archive_folder
+    type: tool
+    tool: google-drive__createFolder
+    args:
+      name: "${inputs.doc_no}-${inputs.contract_name}"
+      parentId: "${inputs.archive_folder_2026_id}"
+
+  - id: archive_files
+    type: agent
+    prompt: |
+      编号：${inputs.doc_no}
+      合同名称：${inputs.contract_name}
+      签署方式：${inputs.signing_method}
+      源文件 ID 列表：${inputs.source_file_ids}
+      归档文件夹 ID：${steps.create_archive_folder.output.id}
+
+      任务（F9 归档整理）：
+      1. 将源文件（合同 + 比对文件 + 手签扫描件）复制或移动到归档文件夹
+         - 使用 google-drive MCP 的 copyFile 或 moveItem 工具
+      2. 确认所有文件已归档
+      3. 更新签字登记表中该编号的状态为"已归档"
+         - 使用 google-drive MCP 的 updateGoogleSheet 工具
+
+      只输出一个 JSON 对象。
+    output_schema:
+      type: object
+      required: [doc_no, archived_files, archive_folder_url, status]
+      properties:
+        doc_no: { type: string }
+        archived_files:
+          type: array
+          items:
+            type: object
+            properties:
+              file_name: { type: string }
+              file_id: { type: string }
+        archive_folder_url: { type: string }
+        status: { type: string, description: "archived" }
+    depends_on: [create_archive_folder]
+
+  # ── S17: 同步内容草稿生成（F11）──────────────────────────────
+  #    G1: 只生成草稿，由总助人工审核后发出
+  - id: generate_sync_draft
+    type: agent
+    prompt: |
+      编号：${inputs.doc_no}
+      合同名称：${inputs.contract_name}
+      签署方式：${inputs.signing_method}
+      发起人信息：${inputs.requestor_info}
+      归档位置：${steps.archive_files.output.archive_folder_url}
+
+      任务（F11 同步内容整理）：
+      生成签字完成后的同步通知草稿，包含：
+      1. 合同编号和名称
+      2. 签署完成确认
+      3. 归档位置链接
+      4. 邮件主题（需带编号前缀，如「NS260429 合同签署完成通知」）
+
+      注意：这是草稿，将由总助人工审核后发出（G1），不要在草稿中使用第一人称。
+
+      只输出一个 JSON 对象。
+    output_schema:
+      type: object
+      required: [doc_no, email_subject, email_body, slack_message]
+      properties:
+        doc_no: { type: string }
+        email_subject:
+          type: string
+          description: "邮件主题（带编号前缀）"
+        email_body:
+          type: string
+          description: "邮件正文草稿"
+        slack_message:
+          type: string
+          description: "Slack 同步消息草稿"
+    depends_on: [archive_files]
+
+  # ── 投递总助审核（G1: 人工审核后发出）──────────────────────────
+  - id: notify_assistant
+    type: notify
+    text: |
+      ✅ 合同 ${inputs.doc_no} 归档完成
+
+      归档位置：${steps.archive_files.output.archive_folder_url}
+
+      以下是同步通知草稿，请审核后发出：
+
+      📧 邮件主题：${steps.generate_sync_draft.output.email_subject}
+      📧 邮件正文：
+      ${steps.generate_sync_draft.output.email_body}
+
+      💬 Slack 消息：
+      ${steps.generate_sync_draft.output.slack_message}
+    depends_on: [generate_sync_draft]
