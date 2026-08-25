@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,7 +18,13 @@ from fleetent.agent_config import (
     ModelTarget,
     default_models,
 )
-from fleetent.config import EmbeddingSettings, KnowledgeBaseSettings, Settings, VectorStoreSettings
+from fleetent.config import (
+    EmbeddingSettings,
+    KnowledgeBaseSettings,
+    RerankSettings,
+    Settings,
+    VectorStoreSettings,
+)
 from fleetent.db import create_database
 from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
 from fleetent.knowledge_base.models import KnowledgeChunk
@@ -33,6 +39,29 @@ REQUIRED_FIXTURE_FIELDS = (
 )
 _DEFAULT_TENANT_ID = "default"
 _DEFAULT_KB_ID = "global"
+# Retrieval modes a fixture query may select. Defaulting to vector keeps every
+# pre-existing fixture (which carries no mode) behaving exactly as before.
+SUPPORTED_QUERY_MODES = ("vector", "keyword", "hybrid")
+DEFAULT_QUERY_MODE = "vector"
+
+# Retrieval quality is a property of the vector backend as much as of the embedding, so the
+# harness has to be able to point at whichever one a deployment actually runs. sqlite stays the
+# default because every existing caller relies on it.
+SUPPORTED_VECTOR_BACKENDS = ("sqlite", "milvus")
+DEFAULT_VECTOR_BACKEND = "sqlite"
+
+# A fixture may declare that it only means anything under a real semantic embedding. Such a
+# fixture is expected to score *zero* with the deterministic provider — that is what proves it
+# measures semantics rather than word overlap — so it must be excluded from the suite-wide
+# "every fixture scores 1.0" expectation instead of silently dragging it down.
+SUPPORTED_FIXTURE_REQUIREMENTS = ("semantic_embedding",)
+
+# Rerank is off unless a run asks for it: a fixture run must never reach out to a reranker by
+# accident. The provider comes from the agent's top-level ``rerank`` block, which is what
+# ``knowledge_base.retrieval.search`` actually reads — the model-route path exists but no
+# production caller uses it, so wiring the block is what makes rerank real here.
+SUPPORTED_RERANK_BACKENDS = ("disabled", "deterministic", "http")
+DEFAULT_RERANK_BACKEND = "disabled"
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _FIXTURE_DIR = _REPO_ROOT / "tests" / "evaluation" / "fixtures" / "knowledge_base_retrieval"
 
@@ -41,8 +70,13 @@ class FixtureValidationError(ValueError):
     """Raised when a knowledge-base retrieval evaluation fixture is invalid."""
 
 
-class RealEmbeddingEvaluationSkipped(RuntimeError):
-    """Raised when a real-embedding evaluation is requested without full config."""
+class RealEmbeddingEvaluationSkipped(RuntimeError):  # noqa: N818 — a skip signal, not a failure
+    """Raised when a real-embedding evaluation is requested without full config.
+
+    Deliberately not named ``...Error``: missing provider credentials is the normal state for a
+    run without them, and callers translate this into a skip. An ``Error`` suffix would invite
+    treating it as a failure.
+    """
 
 
 @dataclass(frozen=True)
@@ -131,6 +165,45 @@ def validate_fixture(fixture: Mapping[str, Any]) -> None:
         top_k = query.get("top_k", 5)
         if not isinstance(top_k, int) or top_k <= 0:
             raise FixtureValidationError(f"queries[{index}].top_k must be a positive integer")
+        _validate_query_search_mode(query, index)
+
+    _validate_fixture_requirement(fixture)
+
+
+def requires_semantic_embedding(fixture: Mapping[str, Any]) -> bool:
+    """Whether this fixture only produces a meaningful score under a real embedding model."""
+    return fixture.get("requires") == "semantic_embedding"
+
+
+def _validate_fixture_requirement(fixture: Mapping[str, Any]) -> None:
+    requirement = fixture.get("requires")
+    if requirement is None:
+        return
+    if requirement not in SUPPORTED_FIXTURE_REQUIREMENTS:
+        raise FixtureValidationError(
+            f"requires must be one of {', '.join(SUPPORTED_FIXTURE_REQUIREMENTS)}, "
+            f"got {requirement!r}"
+        )
+
+
+def _validate_query_search_mode(query: Mapping[str, Any], index: int) -> None:
+    """Validate the optional per-query retrieval mode and rerank flag.
+
+    Absent fields keep the historical behaviour (vector search, no rerank), so existing
+    fixtures stay valid. The rerank/hybrid coupling mirrors the runtime contract in
+    ``knowledge_base.runtime.search`` — rejecting it here surfaces the mismatch at fixture
+    load time rather than as a ValueError mid-run.
+    """
+    mode = query.get("mode", DEFAULT_QUERY_MODE)
+    if mode not in SUPPORTED_QUERY_MODES:
+        raise FixtureValidationError(
+            f"queries[{index}].mode must be one of {', '.join(SUPPORTED_QUERY_MODES)}"
+        )
+    rerank = query.get("rerank", False)
+    if not isinstance(rerank, bool):
+        raise FixtureValidationError(f"queries[{index}].rerank must be a boolean")
+    if rerank and mode != "hybrid":
+        raise FixtureValidationError(f"queries[{index}].rerank requires hybrid mode, got {mode!r}")
 
 
 def load_fixtures(fixture_dir: Path = _FIXTURE_DIR) -> list[dict[str, Any]]:
@@ -146,7 +219,12 @@ def load_fixtures(fixture_dir: Path = _FIXTURE_DIR) -> list[dict[str, Any]]:
 
 
 async def run_deterministic_fixture(
-    fixture: Mapping[str, Any], tmp_path: Path, monkeypatch: Any | None = None
+    fixture: Mapping[str, Any],
+    tmp_path: Path,
+    monkeypatch: Any | None = None,
+    *,
+    vector_backend: str = DEFAULT_VECTOR_BACKEND,
+    rerank_backend: str = DEFAULT_RERANK_BACKEND,
 ) -> RetrievalEvaluationResult:
     """Run one fixture through KB ingest and vector search with deterministic embeddings."""
     del monkeypatch
@@ -158,11 +236,18 @@ async def run_deterministic_fixture(
         db_path=db_path,
         vector_db_path=vector_db_path,
         embedding=EmbeddingSettings(backend="deterministic", dimensions=64),
+        vector_backend=vector_backend,
+        rerank=_rerank_settings(rerank_backend),
     )
 
 
 async def run_real_embedding_fixture(
-    fixture: Mapping[str, Any], tmp_path: Path, monkeypatch: Any | None = None
+    fixture: Mapping[str, Any],
+    tmp_path: Path,
+    monkeypatch: Any | None = None,
+    *,
+    vector_backend: str = DEFAULT_VECTOR_BACKEND,
+    rerank_backend: str = DEFAULT_RERANK_BACKEND,
 ) -> RetrievalEvaluationResult:
     """Run one fixture with a real HTTP embedding provider when explicitly enabled."""
     del monkeypatch
@@ -194,6 +279,8 @@ async def run_real_embedding_fixture(
             model=model,
             api_key_env="FLEETENT_EVAL_EMBEDDING_API_KEY",
         ),
+        vector_backend=vector_backend,
+        rerank=_rerank_settings(rerank_backend),
     )
 
 
@@ -246,10 +333,10 @@ async def _run_fixture(
     db_path: Path,
     vector_db_path: Path,
     embedding: EmbeddingSettings,
+    vector_backend: str = DEFAULT_VECTOR_BACKEND,
+    rerank: RerankSettings | None = None,
 ) -> RetrievalEvaluationResult:
-    from fleetent import agent_config
     from fleetent.knowledge_base import runtime as kb_runtime
-    from fleetent.vector_store import runtime as vector_runtime
 
     validate_fixture(fixture)
     _apply_migrations(db_path)
@@ -257,10 +344,8 @@ async def _run_fixture(
     kb_settings = KnowledgeBaseSettings(enabled=True, chunk_size=80, chunk_overlap=0)
     agent = _agent_for_embedding(
         embedding,
-        vector_store=VectorStoreSettings(
-            backend="sqlite",
-            database_url=f"sqlite:///{vector_db_path}",
-        ),
+        vector_store=_vector_store_settings(vector_backend, vector_db_path),
+        rerank=rerank,
     )
     settings = Settings(database_url=database_url)
     database = create_database(database_url)
@@ -285,13 +370,17 @@ async def _run_fixture(
                 tenant_id=query.get("tenant_id", _DEFAULT_TENANT_ID),
                 kb_ids=list(query.get("kb_ids", [_DEFAULT_KB_ID])),
                 limit=query.get("top_k", 5),
+                mode=query.get("mode", DEFAULT_QUERY_MODE),
+                rerank=bool(query.get("rerank", False)),
             )
             query_results.append(
                 _evaluate_query_result(
                     query_text=query["text"],
                     chunks=chunks,
                     expected_chunks=list(query.get("expected_chunks", fixture["expected_chunks"])),
-                    forbidden_chunks=list(query.get("forbidden_chunks", fixture["forbidden_chunks"])),
+                    forbidden_chunks=list(
+                        query.get("forbidden_chunks", fixture["forbidden_chunks"])
+                    ),
                 )
             )
 
@@ -382,7 +471,7 @@ def _patched_evaluation_runtime(
     settings: Settings,
     database: Any,
     kb_settings: KnowledgeBaseSettings,
-):
+) -> Iterator[None]:
     from fleetent import agent_config
     from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.vector_store import runtime as vector_runtime
@@ -436,13 +525,67 @@ def _first_matching_rank(chunks: Sequence[KnowledgeChunk], snippet: str) -> int 
     return None
 
 
+def _vector_store_settings(vector_backend: str, vector_db_path: Path) -> VectorStoreSettings:
+    """Map a backend name onto the url scheme that backend expects.
+
+    Callers pass a name rather than a url so a fixture run cannot pair ``milvus`` with a
+    ``sqlite://`` url; the schemes are not interchangeable and the mismatch would only surface
+    deep inside the backend.
+    """
+    if vector_backend == "sqlite":
+        return VectorStoreSettings(backend="sqlite", database_url=f"sqlite:///{vector_db_path}")
+    if vector_backend == "milvus":
+        return VectorStoreSettings(backend="milvus", database_url=f"milvus:///{vector_db_path}")
+    raise FixtureValidationError(
+        f"unsupported vector backend: {vector_backend!r}. "
+        f"Supported: {', '.join(SUPPORTED_VECTOR_BACKENDS)}"
+    )
+
+
+def _rerank_settings(rerank_backend: str) -> RerankSettings:
+    """Build the agent's top-level rerank block for a fixture run.
+
+    The http backend reads endpoint/model/key from ``FLEETENT_EVAL_RERANK_*`` for the same reason
+    the embedding path does: a credential must not be able to reach a fixture file.
+    """
+    if rerank_backend not in SUPPORTED_RERANK_BACKENDS:
+        raise FixtureValidationError(
+            f"unsupported rerank backend: {rerank_backend!r}. "
+            f"Supported: {', '.join(SUPPORTED_RERANK_BACKENDS)}"
+        )
+    if rerank_backend != "http":
+        return RerankSettings(backend=rerank_backend)
+
+    endpoint = os.environ.get("FLEETENT_EVAL_RERANK_ENDPOINT", "")
+    model = os.environ.get("FLEETENT_EVAL_RERANK_MODEL", "")
+    if not endpoint or not model or not os.environ.get("FLEETENT_EVAL_RERANK_API_KEY"):
+        raise RealEmbeddingEvaluationSkipped(
+            "http rerank evaluation requires FLEETENT_EVAL_RERANK_ENDPOINT, "
+            "FLEETENT_EVAL_RERANK_MODEL, and FLEETENT_EVAL_RERANK_API_KEY"
+        )
+    return RerankSettings(
+        backend="http",
+        endpoint=endpoint,
+        model=model,
+        api_key_env="FLEETENT_EVAL_RERANK_API_KEY",
+    )
+
+
 def _agent_for_embedding(
     embedding: EmbeddingSettings,
     *,
     vector_store: VectorStoreSettings,
+    rerank: RerankSettings | None = None,
 ) -> AgentFile:
+    resolved_rerank = rerank or RerankSettings()
     if embedding.backend == "deterministic":
-        return AgentFile(name="", version=0, models=default_models(), vector_store=vector_store)
+        return AgentFile(
+            name="",
+            version=0,
+            models=default_models(),
+            vector_store=vector_store,
+            rerank=resolved_rerank,
+        )
     if embedding.backend == "http":
         return AgentFile(
             name="retrieval-real-embedding-eval",
@@ -462,6 +605,7 @@ def _agent_for_embedding(
                 routes={"embedding": [ModelRouteEntry(target="embedding")]},
             ),
             vector_store=vector_store,
+            rerank=resolved_rerank,
         )
     raise FixtureValidationError(f"unsupported embedding backend: {embedding.backend}")
 

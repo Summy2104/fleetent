@@ -1,0 +1,62 @@
+{
+  "name": "semantic paraphrase retrieval",
+  "requires": "semantic_embedding",
+  "documents": [
+    {
+      "filename": "badge.md",
+      "content": "办公室门禁卡失效请到行政前台重新写卡。"
+    },
+    {
+      "filename": "expense.md",
+      "content": "报销单据超过三个月不予受理，需附部门负责人签字。"
+    },
+    {
+      "filename": "repo.md",
+      "content": "代码仓库权限申请由所属团队负责人在权限平台审批。"
+    },
+    {
+      "filename": "db.md",
+      "content": "数据库主从切换失败时联系平台团队值班工程师，升级路径见值班表。"
+    },
+    {
+      "filename": "payroll.md",
+      "content": "薪资发放异常由人力资源部门核实，不经过平台团队。"
+    },
+    {
+      "filename": "vpn.md",
+      "content": "VPN 拨号无法建立连接时提交基础设施支持单。"
+    }
+  ],
+  "queries": [
+    {
+      "text": "DB 挂了找谁",
+      "mode": "vector",
+      "top_k": 1,
+      "expected_chunks": ["数据库主从切换失败时联系平台团队"],
+      "forbidden_chunks": []
+    },
+    {
+      "text": "工资少发了怎么办",
+      "mode": "vector",
+      "top_k": 1,
+      "expected_chunks": ["薪资发放异常由人力资源部门核实"],
+      "forbidden_chunks": []
+    },
+    {
+      "text": "远程办公连不上内网",
+      "mode": "vector",
+      "top_k": 1,
+      "expected_chunks": ["VPN 拨号无法建立连接"],
+      "forbidden_chunks": []
+    },
+    {
+      "text": "database failover on-call escalation",
+      "mode": "vector",
+      "top_k": 1,
+      "expected_chunks": ["数据库主从切换失败时联系平台团队"],
+      "forbidden_chunks": []
+    }
+  ],
+  "expected_chunks": ["数据库主从切换失败时联系平台团队"],
+  "forbidden_chunks": []
+}
