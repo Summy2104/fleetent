@@ -88,3 +88,6 @@ frontend/*.tsbuildinfo
 
 .codegraph
 .understand-anything
+
+# Local test home (real tokens / agent state) — never commit.
+.test-home/
