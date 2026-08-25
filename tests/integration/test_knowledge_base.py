@@ -393,12 +393,16 @@ async def test_ingest_text_indexes_each_chunk_for_keyword_search(monkeypatch, tm
         {"query": "ERR42"},
     ).fetchall()
 
+    # The shadow table stores the tokenized form, not the original text: punctuation is
+    # dropped and CJK runs become bigrams so index and query terms agree. The original is
+    # served from knowledge_chunks.content. Written literally rather than via the
+    # production tokenizer so this stays a real contract check, not a tautology.
     assert rows == [
         {
             "chunk_id": f"{document.id}:chunk:0",
             "tenant_id": "tenant-a",
             "kb_id": "support",
-            "content": "Restart service when ERR42 appears.",
+            "content": "Restart service when ERR42 appears",
         }
     ]
 
@@ -541,6 +545,74 @@ async def test_keyword_search_finds_exact_product_ids_and_error_codes(monkeypatc
             "Product FT-9000 reports ERR-42 when the pressure valve is locked.",
         )
     ]
+
+
+_CJK_DOC = "数据库故障需要联系平台团队处理，升级路径为值班工程师。"
+
+
+async def _ingest_cjk_doc(monkeypatch, tmp_path):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
+
+    from fleetent.knowledge_base import runtime
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    return runtime, await runtime.ingest_text(
+        filename="runbook.md",
+        content=_CJK_DOC,
+        tenant_id="tenant-a",
+        kb_id="support",
+    )
+
+
+@pytest.mark.parametrize("query", ["故障", "数据库", "数据库故障", "平台团队", "值班工程师"])
+async def test_keyword_search_matches_chinese_queries(monkeypatch, tmp_path, query):
+    """Index-side and query-side tokenization must agree, or Chinese never matches.
+
+    FTS5's unicode61 tokenizer treats an entire CJK run as one token, while the query
+    builder emits CJK bigrams. When the two disagree every Chinese query returns zero
+    rows — a silent, total failure of the keyword leg.
+    """
+    runtime, document = await _ingest_cjk_doc(monkeypatch, tmp_path)
+
+    results = await runtime.search(
+        query, tenant_id="tenant-a", kb_ids=["support"], limit=5, mode="keyword"
+    )
+
+    assert [chunk.id for chunk in results] == [f"{document.id}:chunk:0"]
+
+
+async def test_keyword_search_returns_original_content_not_index_form(monkeypatch, tmp_path):
+    """The FTS shadow table stores a tokenized form; callers must still get the original."""
+    runtime, _document = await _ingest_cjk_doc(monkeypatch, tmp_path)
+
+    results = await runtime.search(
+        "数据库故障", tenant_id="tenant-a", kb_ids=["support"], limit=5, mode="keyword"
+    )
+
+    assert results[0].content == _CJK_DOC
+
+
+async def test_keyword_search_matches_mixed_language_content(monkeypatch, tmp_path):
+    """A CJK run adjacent to Latin tokens must leave the Latin tokens searchable as-is."""
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
+
+    from fleetent.knowledge_base import runtime
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    document = await runtime.ingest_text(
+        filename="mixed.md",
+        content="VPN 接入问题由基础设施团队处理，错误码 ERR-42。",
+        tenant_id="tenant-a",
+        kb_id="support",
+    )
+
+    for query in ("VPN", "接入", "基础设施", "ERR-42"):
+        results = await runtime.search(
+            query, tenant_id="tenant-a", kb_ids=["support"], limit=5, mode="keyword"
+        )
+        assert [chunk.id for chunk in results] == [f"{document.id}:chunk:0"], f"query={query!r}"
 
 
 async def test_keyword_search_filters_by_tenant_and_kb(monkeypatch, tmp_path):

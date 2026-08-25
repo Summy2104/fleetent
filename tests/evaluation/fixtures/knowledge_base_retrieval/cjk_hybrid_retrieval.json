@@ -1,0 +1,46 @@
+{
+  "name": "cjk hybrid retrieval",
+  "documents": [
+    {
+      "filename": "database-incident.md",
+      "content": "数据库故障需要联系平台团队处理，升级路径为值班工程师。"
+    },
+    {
+      "filename": "payroll-exception.md",
+      "content": "薪资异常由人力资源部门处理，不走平台团队。"
+    },
+    {
+      "filename": "vpn-access.md",
+      "content": "VPN 接入问题由基础设施支持团队处理，需先完成身份核验。"
+    }
+  ],
+  "queries": [
+    {
+      "text": "数据库故障",
+      "mode": "hybrid",
+      "top_k": 3,
+      "expected_chunks": ["数据库故障需要联系平台团队处理"],
+      "forbidden_chunks": []
+    },
+    {
+      "text": "薪资异常",
+      "mode": "keyword",
+      "top_k": 1,
+      "expected_chunks": ["薪资异常由人力资源部门处理"],
+      "forbidden_chunks": ["数据库故障需要联系平台团队处理"]
+    },
+    {
+      "text": "VPN 接入",
+      "mode": "keyword",
+      "top_k": 1,
+      "expected_chunks": ["VPN 接入问题由基础设施支持团队处理"],
+      "forbidden_chunks": ["薪资异常由人力资源部门处理"]
+    }
+  ],
+  "expected_chunks": [
+    "数据库故障需要联系平台团队处理",
+    "薪资异常由人力资源部门处理",
+    "VPN 接入问题由基础设施支持团队处理"
+  ],
+  "forbidden_chunks": []
+}

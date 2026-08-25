@@ -650,7 +650,9 @@ def _insert_chunks(transaction: SQLiteConnection, chunks: list[KnowledgeChunk]) 
                 "chunk_id": chunk.id,
                 "tenant_id": chunk.tenant_id,
                 "kb_id": chunk.kb_id,
-                "content": chunk.content,
+                # Tokenized, not raw: must match what _fts_query emits. The original text
+                # is served from knowledge_chunks.content, which the search JOIN reads.
+                "content": _fts_index_text(chunk.content),
             },
         )
 
@@ -751,8 +753,17 @@ def _delete_orphan_entities(transaction: SQLiteConnection, tenant_id: str, kb_id
     )
 
 
-def _fts_query(query: str) -> str:
-    tokens = _TOKEN_RE.findall(query)
+def _fts_terms(text: str) -> list[str]:
+    """Tokenize text into FTS terms — the single source of truth for both sides.
+
+    Index and query MUST derive their terms here. FTS5's ``unicode61`` tokenizer keeps an
+    entire CJK run as one token, so a Chinese query built from bigrams can never match raw
+    Chinese stored verbatim. Emitting the same bigram form on both sides keeps them aligned
+    by construction rather than by convention. Latin/digit runs pass through unchanged, so
+    ASCII behaviour is byte-identical to storing the raw text (``unicode61`` already splits
+    on the punctuation ``_TOKEN_RE`` drops).
+    """
+    tokens = _TOKEN_RE.findall(text)
     terms: list[str] = []
     pending_cjk: list[str] = []
     for token in tokens:
@@ -763,7 +774,17 @@ def _fts_query(query: str) -> str:
         pending_cjk = []
         terms.append(token)
     terms.extend(_cjk_terms(pending_cjk))
-    return " ".join(f'"{term}"' for term in terms)
+    return terms
+
+
+def _fts_index_text(content: str) -> str:
+    """Index side: the tokenized form stored in the FTS shadow table (never the original)."""
+    return " ".join(_fts_terms(content))
+
+
+def _fts_query(query: str) -> str:
+    """Query side: the same terms, each quoted so FTS5 operators can never be injected."""
+    return " ".join(f'"{term}"' for term in _fts_terms(query))
 
 
 def _cjk_terms(chars: list[str]) -> list[str]:
