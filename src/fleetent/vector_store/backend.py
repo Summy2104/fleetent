@@ -1,9 +1,10 @@
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import unquote, urlparse
 
 import aiosqlite
@@ -150,6 +151,193 @@ class InMemoryVectorBackend:
         self._vectors.pop(namespace, None)
 
 
+_MILVUS_COLLECTION = "fleetent_vectors"
+# One collection holds every namespace, so the key has to carry both parts: the SQLite backend's
+# key is (namespace, id), and folding that onto Milvus's single primary-key field would let a
+# write in one tenant's namespace overwrite another's row. \x1f cannot occur in either part.
+_MILVUS_KEY_SEPARATOR = "\x1f"
+_MILVUS_MAX_KEY_LENGTH = 1024
+_MILVUS_MAX_FIELD_LENGTH = 512
+
+
+@dataclass(frozen=True)
+class MilvusVectorBackend:
+    """Milvus-backed vector store, embedded (Milvus Lite) or remote, chosen by URI.
+
+    ``milvus:///path/to/file.db`` runs Milvus Lite in-process — no Docker, which is what makes
+    this usable on a developer machine; an ``http(s)://host:port`` url talks to a Milvus cluster
+    through the same client, so switching between them is a config change rather than a code
+    change.
+
+    Namespaces (``kb:{tenant}:{kb_id}``, ``mem:{user}``) cannot be collection names — the colons
+    are illegal — so isolation rides on a partition-key field: Milvus groups rows physically by
+    its hash, and every read additionally filters on it. The filter is what guarantees isolation;
+    the partition key is what keeps the scan from crossing tenants.
+
+    Stateless like ``SQLiteVectorBackend``: a client is built per call. pymilvus keeps one
+    embedded server per path internally, so only the first call in a process pays startup.
+    """
+
+    database_url: str
+
+    def __post_init__(self) -> None:
+        _resolve_milvus_uri(self.database_url)
+
+    async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+        if not vector:
+            raise ValueError("vector must not be empty")
+
+        await _to_thread(self._upsert_sync, id, vector, namespace)
+
+    async def search(
+        self, vector: list[float], namespace: str, limit: int = 10
+    ) -> list[SearchResult]:
+        if limit <= 0:
+            return []
+
+        return await _to_thread(self._search_sync, vector, namespace, limit)
+
+    async def delete(self, id: str, namespace: str) -> None:
+        await _to_thread(self._delete_sync, id, namespace)
+
+    async def clear_namespace(self, namespace: str) -> None:
+        await _to_thread(self._clear_namespace_sync, namespace)
+
+    # ── synchronous bodies (pymilvus has no async client) ──
+
+    def _client(self) -> Any:
+        from pymilvus import MilvusClient  # type: ignore[import-untyped]
+
+        uri = _resolve_milvus_uri(self.database_url)
+        if not uri.startswith(("http://", "https://")):
+            Path(uri).parent.mkdir(parents=True, exist_ok=True)
+        return MilvusClient(uri)
+
+    def _upsert_sync(self, id: str, vector: list[float], namespace: str) -> None:
+        client = self._client()
+        self._ensure_collection(client, dimensions=len(vector))
+        client.upsert(
+            _MILVUS_COLLECTION,
+            data=[
+                {
+                    "pk": _milvus_key(namespace, id),
+                    "namespace": namespace,
+                    "chunk_id": id,
+                    "vector": vector,
+                }
+            ],
+        )
+
+    def _search_sync(self, vector: list[float], namespace: str, limit: int) -> list[SearchResult]:
+        client = self._client()
+        if not client.has_collection(_MILVUS_COLLECTION):
+            return []
+
+        hits = client.search(
+            _MILVUS_COLLECTION,
+            data=[vector],
+            limit=limit,
+            filter=_namespace_filter(namespace),
+            output_fields=["chunk_id"],
+        )
+        results = [
+            SearchResult(id=hit["entity"]["chunk_id"], score=float(hit["distance"]))
+            for hit in (hits[0] if hits else [])
+        ]
+        # Milvus already returns descending distance; re-sorting pins the id tie-break so the
+        # ordering contract matches the other backends exactly.
+        return sorted(results, key=lambda result: (-result.score, result.id))[:limit]
+
+    def _delete_sync(self, id: str, namespace: str) -> None:
+        client = self._client()
+        if not client.has_collection(_MILVUS_COLLECTION):
+            return
+        client.delete(_MILVUS_COLLECTION, ids=[_milvus_key(namespace, id)])
+
+    def _clear_namespace_sync(self, namespace: str) -> None:
+        client = self._client()
+        if not client.has_collection(_MILVUS_COLLECTION):
+            return
+        client.delete(_MILVUS_COLLECTION, filter=_namespace_filter(namespace))
+
+    def _ensure_collection(self, client: Any, dimensions: int) -> None:
+        from pymilvus import DataType
+
+        if client.has_collection(_MILVUS_COLLECTION):
+            existing = _collection_dimensions(client)
+            if existing is not None and existing != dimensions:
+                raise ValueError(
+                    f"Milvus collection {_MILVUS_COLLECTION!r} has vector dimension {existing}, "
+                    f"got {dimensions}. Reindex the namespace instead of mixing widths."
+                )
+            return
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("pk", DataType.VARCHAR, is_primary=True, max_length=_MILVUS_MAX_KEY_LENGTH)
+        schema.add_field(
+            "namespace",
+            DataType.VARCHAR,
+            max_length=_MILVUS_MAX_FIELD_LENGTH,
+            is_partition_key=True,
+        )
+        schema.add_field("chunk_id", DataType.VARCHAR, max_length=_MILVUS_MAX_FIELD_LENGTH)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dimensions)
+
+        index_params = client.prepare_index_params()
+        # AUTOINDEX lets Milvus Lite fall back to a flat scan while a real cluster picks HNSW/IVF
+        # for the same declaration; COSINE matches the similarity the other backends report.
+        index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+        client.create_collection(_MILVUS_COLLECTION, schema=schema, index_params=index_params)
+
+
+def _milvus_key(namespace: str, id: str) -> str:
+    return f"{namespace}{_MILVUS_KEY_SEPARATOR}{id}"
+
+
+def _namespace_filter(namespace: str) -> str:
+    if '"' in namespace or "\\" in namespace:
+        raise ValueError(f"namespace must not contain quotes or backslashes: {namespace!r}")
+    return f'namespace == "{namespace}"'
+
+
+def _collection_dimensions(client: Any) -> int | None:
+    for field in client.describe_collection(_MILVUS_COLLECTION).get("fields", []):
+        if field.get("name") == "vector":
+            dim = field.get("params", {}).get("dim")
+            return int(dim) if dim is not None else None
+    return None
+
+
+def _resolve_milvus_uri(database_url: str) -> str:
+    """Translate a configured url into a pymilvus uri.
+
+    ``milvus:///abs/path.db`` selects embedded Milvus Lite; an http(s) url selects a remote
+    cluster. Anything else is rejected here rather than deep inside pymilvus, so a typo surfaces
+    at construction time.
+    """
+    if not database_url.strip():
+        raise ValueError("milvus vector backend requires a non-empty database_url")
+    if database_url.startswith(("http://", "https://")):
+        return database_url
+    if database_url.startswith("milvus://"):
+        path = unquote(urlparse(database_url).path)
+        if not path:
+            raise ValueError(f"milvus url is missing a database path: {database_url!r}")
+        return path
+    raise ValueError(
+        f"Unsupported milvus database_url {database_url!r}. "
+        "Use milvus:///path/to/file.db for embedded Milvus Lite or http(s)://host:port for a "
+        "remote cluster."
+    )
+
+
+async def _to_thread[T](func: Callable[..., T], *args: object) -> T:
+    """Run a blocking pymilvus call off the event loop."""
+    import anyio.to_thread
+
+    return await anyio.to_thread.run_sync(partial(func, *args))
+
+
 def _similarity(left: list[float], right: list[float]) -> float:
     if len(left) != len(right):
         return 0.0
@@ -172,9 +360,13 @@ def create_vector_backend(
         if database_url is None:
             raise ValueError("sqlite vector backend requires a local sqlite database_url")
         return SQLiteVectorBackend(database_url=database_url)
+    if settings.backend == "milvus":
+        if database_url is None:
+            raise ValueError("milvus vector backend requires a database_url")
+        return MilvusVectorBackend(database_url=database_url)
     raise ValueError(
         f"Unsupported vector_store.backend {settings.backend!r}. "
-        "Supported vector backends: memory, sqlite"
+        "Supported vector backends: memory, sqlite, milvus"
     )
 
 

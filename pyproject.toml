@@ -34,6 +34,12 @@ dependencies = [
     "authlib>=1.6.5",
 ]
 
+[project.optional-dependencies]
+# Optional so the core install does not carry pyarrow/faiss/grpcio (~50MB) for a backend most
+# deployments do not select. `milvus_lite` is what makes the embedded, Docker-free mode work;
+# the same client talks to a remote Milvus cluster, so only the URI differs between the two.
+milvus = ["pymilvus[milvus_lite]>=3.0"]
+
 [project.scripts]
 fleetent = "fleetent.__main__:main"
 
