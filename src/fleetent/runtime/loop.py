@@ -1799,6 +1799,33 @@ def _record_agent_run_completed(
 _active_runs: int = 0
 
 
+def _extract_goal(messages: list[dict[str, Any]]) -> str:
+    """The plan-execute goal: the last user message's text content (or "")."""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            return content if isinstance(content, str) else str(content)
+    return ""
+
+
+async def _dispatch_plan_execute(
+    messages: list[dict[str, Any]],
+    *,
+    agent_name: str | None,
+    principal: Principal | None,
+) -> str:
+    """Run the plan-and-execute strategy and return its synthesized final reply.
+
+    Lazy import breaks the loop<->plan_execute import cycle (plan_execute's default
+    step runner ultimately calls back into this loop for each agent step)."""
+    from fleetent.runtime import plan_execute
+
+    result = await plan_execute.run_plan_execute(
+        _extract_goal(messages), agent_name=agent_name, principal=principal
+    )
+    return result.text
+
+
 async def run(
     messages: list[dict[str, Any]],
     principal: Principal | None = None,
@@ -1867,6 +1894,18 @@ async def run(
         # sub_agent gaps the event-driven tool_call progress never reaches. Owner-task
         # scoped to this coroutine; a no-op for sub-agents / no progress_func.
         async with _heartbeat_during(progress_func, is_sub_agent=is_sub_agent):
+            # control-strategy dispatch: a plan_execute agent decomposes the goal up
+            # front and executes the plan. Sub-agent runs always use ReAct — each plan
+            # step is itself a ReAct sub-agent, so recursing into plan_execute would let
+            # planning nest without bound.
+            if (
+                governance is not None
+                and governance.control_strategy == "plan_execute"
+                and not is_sub_agent
+            ):
+                return await _dispatch_plan_execute(
+                    messages, agent_name=agent_name, principal=principal
+                )
             return await _run_inner(
                 messages=messages,
                 user_id=user_id,

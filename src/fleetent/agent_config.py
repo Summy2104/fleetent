@@ -537,6 +537,10 @@ class AgentFile(BaseModel):
     # reject; only medium/high are configurable, and only to non-reject modes.
     action_gate_medium_mode: Literal["direct", "sandbox", "approval"] = "approval"
     action_gate_high_mode: Literal["direct", "sandbox", "approval"] = "approval"
+    # control strategy — the agent's turn-level paradigm. "react" (default) runs the
+    # interleaved reason-act loop; "plan_execute" decomposes the goal into a plan up
+    # front, executes it step by step, and replans on step failure (runtime/plan_execute).
+    control_strategy: Literal["react", "plan_execute"] = "react"
     # provider circuit breaker
     provider_failure_threshold: int = 3
     provider_cooldown_seconds: int = 60

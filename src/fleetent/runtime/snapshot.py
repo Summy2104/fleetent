@@ -61,6 +61,9 @@ class GovernanceConfig:
     # opt-in per deployment (C2 action-gate).
     action_gate_medium_mode: str = "approval"
     action_gate_high_mode: str = "approval"
+    # control strategy — "react" (default) or "plan_execute"; selects the turn-level
+    # paradigm the loop dispatches to (plan-and-execute).
+    control_strategy: str = "react"
 
 
 def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
@@ -83,6 +86,7 @@ def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
         hooks_timeout_seconds=agent.hooks_timeout_seconds,
         action_gate_medium_mode=agent.action_gate_medium_mode,
         action_gate_high_mode=agent.action_gate_high_mode,
+        control_strategy=agent.control_strategy,
     )
 
 
